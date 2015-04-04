@@ -2,10 +2,12 @@
 package logging
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -46,14 +48,30 @@ const (
 const FORMAT_TIME_DAY string = "20060102"
 const FORMAT_TIME_HOUR string = "2006010215"
 
-var _log *logger = New()
+const DEFAULT_BACKEND_NAME = "console"
 
-func init() {
-	SetFlags(Ldate | Ltime | Lshortfile)
+type Logger map[string]*Backend
+
+type Backend struct {
+	_log *log.Logger
+
+	Level   LogLevel
+	Colored bool
+
+	dailyRolling bool
+	hourRolling  bool
+	sizeRolling  int
+	fileName     string
+	logSuffix    string
+	fd           *os.File
+
+	lock sync.Mutex
 }
 
-func Logger() *log.Logger {
-	return _log._log
+var _log Logger = NewSimpleLogger()
+
+func init() {
+	SetFlags(DEFAULT_BACKEND_NAME, Ldate|Ltime|Lshortfile)
 }
 
 func CrashLog(file string) {
@@ -65,134 +83,166 @@ func CrashLog(file string) {
 	}
 }
 
-func SetLevel(level LogLevel) {
-	_log.SetLevel(level)
-}
-func GetLogLevel() LogLevel {
-	return _log.level
+func AddBackend(name string, b *Backend) {
+	_log[name] = b
 }
 
-func SetOutput(out io.Writer) {
-	_log.SetOutput(out)
-}
-
-func SetOutputByName(path string) error {
-	return _log.SetOutputByName(path)
-}
-
-func SetFlags(flags int) {
-	_log._log.SetFlags(flags)
+func DeleteBackend(name string) {
+	delete(_log, name)
 }
 
 func Info(v ...interface{}) {
-	_log.Info(v...)
+	for _, l := range _log {
+		l.Info(v...)
+	}
 }
 
 func Infof(format string, v ...interface{}) {
-	_log.Infof(format, v...)
+	for _, l := range _log {
+		l.Infof(format, v...)
+	}
 }
 
 func Debug(v ...interface{}) {
-	_log.Debug(v...)
+	for _, l := range _log {
+		l.Debug(v...)
+	}
 }
 
 func Debugf(format string, v ...interface{}) {
-	_log.Debugf(format, v...)
+	for _, l := range _log {
+		l.Debugf(format, v...)
+	}
 }
 
 func Warning(v ...interface{}) {
-	_log.Warning(v...)
+	for _, l := range _log {
+		l.Warning(v...)
+	}
 }
 
 func Warningf(format string, v ...interface{}) {
-	_log.Warningf(format, v...)
+	for _, l := range _log {
+		l.Warningf(format, v...)
+	}
 }
 
 func Error(v ...interface{}) {
-	_log.Error(v...)
+	for _, l := range _log {
+		l.Error(v...)
+	}
 }
 
 func Errorf(format string, v ...interface{}) {
-	_log.Errorf(format, v...)
+	for _, l := range _log {
+		l.Errorf(format, v...)
+	}
 }
 
 func Fatal(v ...interface{}) {
-	_log.Fatal(v...)
+	for _, l := range _log {
+		l.Fatal(v...)
+	}
 }
 
 func Fatalf(format string, v ...interface{}) {
-	_log.Fatalf(format, v...)
+	for _, l := range _log {
+		l.Fatalf(format, v...)
+	}
 }
 
-func SetLevelByString(level string) {
-	_log.SetLevelByString(level)
+func SetLevel(name string, level LogLevel) {
+	if b, ok := _log[name]; ok {
+		b.Level = level
+	}
 }
 
-func SetHighlighting(highlighting bool) {
-	_log.SetHighlighting(highlighting)
+func GetLevel(name string) (LogLevel, error) {
+	if b, ok := _log[name]; ok {
+		return b.Level, nil
+	}
+
+	return LOG_LEVEL_NONE, errors.New("Backend Not Found")
 }
 
-func SetRotateByDay() {
-	_log.SetRotateByDay()
+func SetOutput(name string, out io.Writer) {
+	if b, ok := _log[name]; ok {
+		b.SetOutput(out)
+	}
 }
 
-func SetRotateByHour() {
-	_log.SetRotateByHour()
+func SetOutputByName(name string, path string) error {
+	if b, ok := _log[name]; ok {
+		return b.SetOutputByName(path)
+	}
+	return nil
 }
 
-type logger struct {
-	_log         *log.Logger
-	level        LogLevel
-	highlighting bool
-
-	dailyRolling bool
-	hourRolling  bool
-
-	fileName  string
-	logSuffix string
-	fd        *os.File
-
-	lock sync.Mutex
+func SetFlags(name string, flags int) {
+	if b, ok := _log[name]; ok {
+		b._log.SetFlags(flags)
+	}
 }
 
-func (l *logger) SetHighlighting(highlighting bool) {
-	l.highlighting = highlighting
+func SetColored(name string, colored bool) {
+	if b, ok := _log[name]; ok {
+		b.Colored = colored
+	}
 }
 
-func (l *logger) SetLevel(level LogLevel) {
-	l.level = level
+func SetRotateByDay(name string) {
+	if b, ok := _log[name]; ok {
+		b.SetRotateByDay()
+	}
 }
 
-func (l *logger) SetLevelByString(level string) {
-	l.level = StringToLogLevel(level)
+func SetRotateByHour(name string) {
+	if b, ok := _log[name]; ok {
+		b.SetRotateByHour()
+	}
 }
 
-func (l *logger) SetRotateByDay() {
-	l.dailyRolling = true
-	l.logSuffix = genDayTime(time.Now())
+func SetRotateBySize(name string, size int) {
+	if b, ok := _log[name]; ok {
+		b.SetRotateBySize(size)
+	}
 }
 
-func (l *logger) SetRotateByHour() {
-	l.hourRolling = true
-	l.logSuffix = genHourTime(time.Now())
+func (b *Backend) SetLevelByString(level string) {
+	b.Level = StringToLogLevel(level)
 }
 
-func (l *logger) rotate() error {
-	l.lock.Lock()
-	defer l.lock.Unlock()
+func (b *Backend) SetRotateByDay() {
+	b.dailyRolling = true
+	b.logSuffix = genDayTime(time.Now())
+}
+
+func (b *Backend) SetRotateByHour() {
+	b.hourRolling = true
+	b.logSuffix = genHourTime(time.Now())
+}
+
+func (b *Backend) SetRotateBySize(size int) {
+	b.sizeRolling = size
+	b.logSuffix = genNextSeq(b.logSuffix)
+}
+
+func (b *Backend) rotate() error {
+	b.lock.Lock()
+	defer b.lock.Unlock()
 
 	var suffix string
-	if l.dailyRolling {
+	if b.dailyRolling {
 		suffix = genDayTime(time.Now())
-	} else if l.hourRolling {
+	} else if b.hourRolling {
 		suffix = genHourTime(time.Now())
 	} else {
 		return nil
 	}
 
 	// Notice: if suffix is not equal to l.LogSuffix, then rotate
-	if suffix != l.logSuffix {
-		err := l.doRotate(suffix)
+	if suffix != b.logSuffix {
+		err := b.doRotate(suffix)
 		if err != nil {
 			return err
 		}
@@ -201,50 +251,92 @@ func (l *logger) rotate() error {
 	return nil
 }
 
-func (l *logger) doRotate(suffix string) error {
-	lastFileName := l.fileName + "." + l.logSuffix
-	err := os.Rename(l.fileName, lastFileName)
+func (b *Backend) doRotate(suffix string) error {
+	lastFileName := b.fileName + "." + b.logSuffix
+	err := os.Rename(b.fileName, lastFileName)
 	if err != nil {
 		return err
 	}
 
 	// Notice: Not check error, is this ok?
-	l.fd.Close()
+	b.fd.Close()
 
-	err = l.SetOutputByName(l.fileName)
+	err = b.SetOutputByName(b.fileName)
 	if err != nil {
 		return err
 	}
 
-	l.logSuffix = suffix
+	b.logSuffix = suffix
 
 	return nil
 }
 
-func (l *logger) SetOutput(out io.Writer) {
-	l._log = log.New(out, l._log.Prefix(), l._log.Flags())
+func (b *Backend) SetOutput(out io.Writer) {
+	b._log = log.New(out, b._log.Prefix(), b._log.Flags())
 }
 
-func (l *logger) SetOutputByName(path string) error {
+func (b *Backend) SetOutputByName(path string) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0666)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	l.SetOutput(f)
+	b.SetOutput(f)
 
-	l.fileName = path
-	l.fd = f
+	b.fileName = path
+	b.fd = f
 
 	return err
 }
 
-func (l *logger) log(t LogType, v ...interface{}) {
-	if l.level|LogLevel(t) != l.level {
+func (b *Backend) Fatal(v ...interface{}) {
+	b.log(LOG_FATAL, v...)
+	os.Exit(-1)
+}
+
+func (b *Backend) Fatalf(format string, v ...interface{}) {
+	b.logf(LOG_FATAL, format, v...)
+	os.Exit(-1)
+}
+
+func (b *Backend) Error(v ...interface{}) {
+	b.log(LOG_ERROR, v...)
+}
+
+func (b *Backend) Errorf(format string, v ...interface{}) {
+	b.logf(LOG_ERROR, format, v...)
+}
+
+func (b *Backend) Warning(v ...interface{}) {
+	b.log(LOG_WARNING, v...)
+}
+
+func (b *Backend) Warningf(format string, v ...interface{}) {
+	b.logf(LOG_WARNING, format, v...)
+}
+
+func (b *Backend) Debug(v ...interface{}) {
+	b.log(LOG_DEBUG, v...)
+}
+
+func (b *Backend) Debugf(format string, v ...interface{}) {
+	b.logf(LOG_DEBUG, format, v...)
+}
+
+func (b *Backend) Info(v ...interface{}) {
+	b.log(LOG_INFO, v...)
+}
+
+func (b *Backend) Infof(format string, v ...interface{}) {
+	b.logf(LOG_INFO, format, v...)
+}
+
+func (b *Backend) log(t LogType, v ...interface{}) {
+	if b.Level|LogLevel(t) != b.Level {
 		return
 	}
 
-	err := l.rotate()
+	err := b.rotate()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 		return
@@ -252,7 +344,7 @@ func (l *logger) log(t LogType, v ...interface{}) {
 
 	v1 := make([]interface{}, len(v)+2)
 	logStr, logColor := LogTypeToString(t)
-	if l.highlighting {
+	if b.Colored {
 		v1[0] = "\033" + logColor + "m[" + logStr + "]"
 		copy(v1[1:], v)
 		v1[len(v)+1] = "\033[0m"
@@ -263,15 +355,15 @@ func (l *logger) log(t LogType, v ...interface{}) {
 	}
 
 	s := fmt.Sprintln(v1...)
-	l._log.Output(4, s)
+	b._log.Output(4, s)
 }
 
-func (l *logger) logf(t LogType, format string, v ...interface{}) {
-	if l.level|LogLevel(t) != l.level {
+func (b *Backend) logf(t LogType, format string, v ...interface{}) {
+	if b.Level|LogLevel(t) != b.Level {
 		return
 	}
 
-	err := l.rotate()
+	err := b.rotate()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 		return
@@ -279,54 +371,12 @@ func (l *logger) logf(t LogType, format string, v ...interface{}) {
 
 	logStr, logColor := LogTypeToString(t)
 	var s string
-	if l.highlighting {
+	if b.Colored {
 		s = "\033" + logColor + "m[" + logStr + "] " + fmt.Sprintf(format, v...) + "\033[0m"
 	} else {
 		s = "[" + logStr + "] " + fmt.Sprintf(format, v...)
 	}
-	l._log.Output(4, s)
-}
-
-func (l *logger) Fatal(v ...interface{}) {
-	l.log(LOG_FATAL, v...)
-	os.Exit(-1)
-}
-
-func (l *logger) Fatalf(format string, v ...interface{}) {
-	l.logf(LOG_FATAL, format, v...)
-	os.Exit(-1)
-}
-
-func (l *logger) Error(v ...interface{}) {
-	l.log(LOG_ERROR, v...)
-}
-
-func (l *logger) Errorf(format string, v ...interface{}) {
-	l.logf(LOG_ERROR, format, v...)
-}
-
-func (l *logger) Warning(v ...interface{}) {
-	l.log(LOG_WARNING, v...)
-}
-
-func (l *logger) Warningf(format string, v ...interface{}) {
-	l.logf(LOG_WARNING, format, v...)
-}
-
-func (l *logger) Debug(v ...interface{}) {
-	l.log(LOG_DEBUG, v...)
-}
-
-func (l *logger) Debugf(format string, v ...interface{}) {
-	l.logf(LOG_DEBUG, format, v...)
-}
-
-func (l *logger) Info(v ...interface{}) {
-	l.log(LOG_INFO, v...)
-}
-
-func (l *logger) Infof(format string, v ...interface{}) {
-	l.logf(LOG_INFO, format, v...)
+	b._log.Output(4, s)
 }
 
 func StringToLogLevel(level string) LogLevel {
@@ -343,8 +393,9 @@ func StringToLogLevel(level string) LogLevel {
 		return LOG_LEVEL_DEBUG
 	case "info":
 		return LOG_LEVEL_INFO
+	default:
+		return LOG_LEVEL_ALL
 	}
-	return LOG_LEVEL_ALL
 }
 
 func LogTypeToString(t LogType) (string, string) {
@@ -359,8 +410,9 @@ func LogTypeToString(t LogType) (string, string) {
 		return "debug", "[0;36"
 	case LOG_INFO:
 		return "info", "[0;37"
+	default:
+		return "unknown", "[0;37"
 	}
-	return "unknown", "[0;37"
 }
 
 func genDayTime(t time.Time) string {
@@ -371,10 +423,26 @@ func genHourTime(t time.Time) string {
 	return t.Format(FORMAT_TIME_HOUR)
 }
 
-func New() *logger {
-	return Newlogger(os.Stdout, "")
+func genNextSeq(suffix string) string {
+	if suffix == "" {
+		return "0"
+	}
+	seq, _ := strconv.Atoi(suffix)
+	return strconv.Itoa(seq + 1)
 }
 
-func Newlogger(w io.Writer, prefix string) *logger {
-	return &logger{_log: log.New(w, prefix, LstdFlags), level: LOG_LEVEL_ALL, highlighting: true}
+func NewSimpleLogger() Logger {
+	return Logger{DEFAULT_BACKEND_NAME: NewSimpleBackend()}
+}
+
+func New() Logger {
+	return make(Logger)
+}
+
+func NewSimpleBackend() *Backend {
+	return NewBackend(os.Stdout, "", LOG_LEVEL_ALL, true)
+}
+
+func NewBackend(w io.Writer, prefix string, level LogLevel, colored bool) *Backend {
+	return &Backend{_log: log.New(w, prefix, LstdFlags), Level: level, Colored: colored}
 }
