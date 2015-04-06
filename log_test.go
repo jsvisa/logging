@@ -65,7 +65,7 @@ func checkLogData(fileName string, containData string, num int64) error {
 }
 
 func TestDayRotateCase(t *testing.T) {
-	_log = New()
+	_b := NewSimpleBackend()
 
 	logName := "example_day_test.log"
 	if isFileExists(logName) {
@@ -75,35 +75,35 @@ func TestDayRotateCase(t *testing.T) {
 		}
 	}
 
-	SetRotateByDay()
-	err := SetOutputByName(logName)
+	_b.SetRotateByDay()
+	err := _b.SetOutputByName(logName)
 	if err != nil {
 		t.Errorf("SetOutputByName fail - %s, %s\n", err.Error(), logName)
 	}
 
-	if _log.logSuffix == "" {
-		t.Errorf("bad log suffix fail - %s\n", _log.logSuffix)
+	if _b.logSuffix == "" {
+		t.Errorf("bad log suffix fail - %s\n", _b.logSuffix)
 	}
 
-	day, err := parseDate(_log.logSuffix, FORMAT_TIME_DAY)
+	day, err := parseDate(_b.logSuffix, FORMAT_TIME_DAY)
 	if err != nil {
-		t.Errorf("parseDate fail - %s, %s\n", err.Error(), _log.logSuffix)
+		t.Errorf("parseDate fail - %s, %s\n", err.Error(), _b.logSuffix)
 	}
 
-	_log.Info("Test data")
-	_log.Infof("Test data - %s", day.String())
+	_b.Info("Test data")
+	_b.Infof("Test data - %s", day.String())
 
 	// mock log suffix to check rotate
 	lastDay := day.AddDate(0, 0, -1)
-	_log.logSuffix = genDayTime(lastDay)
-	oldLogSuffix := _log.logSuffix
+	_b.logSuffix = genDayTime(lastDay)
+	oldLogSuffix := _b.logSuffix
 
-	_log.Info("Test new data")
-	_log.Infof("Test new data - %s", day.String())
+	_b.Info("Test new data")
+	_b.Infof("Test new data - %s", day.String())
 
-	err = _log.fd.Close()
+	err = _b.fd.Close()
 	if err != nil {
-		t.Errorf("close log fd fail - %s, %s\n", err.Error(), _log.fileName)
+		t.Errorf("close log fd fail - %s, %s\n", err.Error(), _b.fileName)
 	}
 
 	// check both old and new log file datas
@@ -131,7 +131,7 @@ func TestDayRotateCase(t *testing.T) {
 }
 
 func TestHourRotateCase(t *testing.T) {
-	_log = New()
+	_b := NewSimpleBackend()
 
 	logName := "example_hour_test.log"
 	if isFileExists(logName) {
@@ -141,35 +141,95 @@ func TestHourRotateCase(t *testing.T) {
 		}
 	}
 
-	SetRotateByHour()
-	err := SetOutputByName(logName)
+	_b.SetRotateByHour()
+	err := _b.SetOutputByName(logName)
 	if err != nil {
 		t.Errorf("SetOutputByName fail - %s, %s\n", err.Error(), logName)
 	}
 
-	if _log.logSuffix == "" {
-		t.Errorf("bad log suffix fail - %s\n", _log.logSuffix)
+	if _b.logSuffix == "" {
+		t.Errorf("bad log suffix fail - %s\n", _b.logSuffix)
 	}
 
-	hour, err := parseDate(_log.logSuffix, FORMAT_TIME_HOUR)
+	hour, err := parseDate(_b.logSuffix, FORMAT_TIME_HOUR)
 	if err != nil {
-		t.Errorf("parseDate fail - %s, %s\n", err.Error(), _log.logSuffix)
+		t.Errorf("parseDate fail - %s, %s\n", err.Error(), _b.logSuffix)
 	}
 
-	_log.Info("Test data")
-	_log.Infof("Test data - %s", hour.String())
+	_b.Info("Test data")
+	_b.Infof("Test data - %s", hour.String())
 
 	// mock log suffix to check rotate
 	lastHour := hour.Add(time.Duration(-1 * time.Hour))
-	_log.logSuffix = genHourTime(lastHour)
-	oldLogSuffix := _log.logSuffix
+	_b.logSuffix = genHourTime(lastHour)
+	oldLogSuffix := _b.logSuffix
 
-	_log.Info("Test new data")
-	_log.Infof("Test new data - %s", hour.String())
+	_b.Info("Test new data")
+	_b.Infof("Test new data - %s", hour.String())
 
-	err = _log.fd.Close()
+	err = _b.fd.Close()
 	if err != nil {
-		t.Errorf("close log fd fail - %s, %s\n", err.Error(), _log.fileName)
+		t.Errorf("close log fd fail - %s, %s\n", err.Error(), _b.fileName)
+	}
+
+	// check both old and new log file datas
+	oldLogName := logName + "." + oldLogSuffix
+	err = checkLogData(oldLogName, "Test data", 2)
+	if err != nil {
+		t.Errorf("old log file checkLogData fail - %s, %s\n", err.Error(), oldLogName)
+	}
+
+	err = checkLogData(logName, "Test new data", 2)
+	if err != nil {
+		t.Errorf("new log file checkLogData fail - %s, %s\n", err.Error(), logName)
+	}
+
+	// remove test log files
+	err = os.Remove(oldLogName)
+	if err != nil {
+		t.Errorf("Remove final old log file fail - %s, %s\n", err.Error(), oldLogName)
+	}
+
+	err = os.Remove(logName)
+	if err != nil {
+		t.Errorf("Remove final new log file fail - %s, %s\n", err.Error(), logName)
+	}
+}
+
+func TestSizeRotateCase(t *testing.T) {
+	_b := NewSimpleBackend()
+
+	logName := "example_size_test.log"
+	if isFileExists(logName) {
+		err := os.Remove(logName)
+		if err != nil {
+			t.Errorf("Remove old log file fail - %s, %s\n", err.Error(), logName)
+		}
+	}
+
+	_b.SetRotateBySize(int64(128))
+	err := _b.SetOutputByName(logName)
+	if err != nil {
+		t.Errorf("SetOutputByName fail - %s, %s\n", err.Error(), logName)
+	}
+
+	if _b.logSuffix == "" || _b.logSuffix != "0" {
+		t.Errorf("bad log suffix fail - %s\n", _b.logSuffix)
+	}
+
+	_b.Info("Test data")
+	_b.Infof("Test data - %128s", "128 bytes mocked string")
+
+	// mock log suffix to check rotate
+	_b.logSuffix = genNextSeq("999")
+	oldLogSuffix := _b.logSuffix
+
+	_b.Info("Test new data")
+	_b.Infof("Test new data - %128s", "128 bytes mocked new string")
+
+	err = _b.fd.Close()
+	if err != nil {
+		t.Errorf("close log fd fail - %s, %s\n", err.Error(), _b.fileName)
 	}
 
 	// check both old and new log file datas
