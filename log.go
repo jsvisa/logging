@@ -405,10 +405,10 @@ func StringToLogLevel(level string) LogLevel {
 		return LOG_LEVEL_WARN
 	case "warning":
 		return LOG_LEVEL_WARN
-	case "debug":
-		return LOG_LEVEL_DEBUG
 	case "info":
 		return LOG_LEVEL_INFO
+	case "debug":
+		return LOG_LEVEL_DEBUG
 	default:
 		return LOG_LEVEL_ALL
 	}
@@ -422,10 +422,10 @@ func LogTypeToString(t LogType) (string, string) {
 		return "error", "[0;31"
 	case LOG_WARNING:
 		return "warning", "[0;33"
-	case LOG_DEBUG:
-		return "debug", "[0;36"
 	case LOG_INFO:
 		return "info", "[0;37"
+	case LOG_DEBUG:
+		return "debug", "[0;36"
 	default:
 		return "unknown", "[0;37"
 	}
