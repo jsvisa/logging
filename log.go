@@ -55,14 +55,15 @@ type Logger map[string]*Backend
 type Backend struct {
 	_log *log.Logger
 
-	Level   LogLevel
-	Colored bool
+	level   LogLevel
+	colored bool
 
 	dailyRolling bool
 	hourRolling  bool
-	sizeRolling  int
+	sizeRolling  bool
 	fileName     string
 	logSuffix    string
+	rotateSize   int64
 	fd           *os.File
 
 	lock sync.Mutex
@@ -153,13 +154,13 @@ func Fatalf(format string, v ...interface{}) {
 
 func SetLevel(name string, level LogLevel) {
 	if b, ok := _log[name]; ok {
-		b.Level = level
+		b.level = level
 	}
 }
 
 func GetLevel(name string) (LogLevel, error) {
 	if b, ok := _log[name]; ok {
-		return b.Level, nil
+		return b.level, nil
 	}
 
 	return LOG_LEVEL_NONE, errors.New("Backend Not Found")
@@ -186,7 +187,7 @@ func SetFlags(name string, flags int) {
 
 func SetColored(name string, colored bool) {
 	if b, ok := _log[name]; ok {
-		b.Colored = colored
+		b.colored = colored
 	}
 }
 
@@ -202,14 +203,14 @@ func SetRotateByHour(name string) {
 	}
 }
 
-func SetRotateBySize(name string, size int) {
+func SetRotateBySize(name string, size int64) {
 	if b, ok := _log[name]; ok {
 		b.SetRotateBySize(size)
 	}
 }
 
 func (b *Backend) SetLevelByString(level string) {
-	b.Level = StringToLogLevel(level)
+	b.level = StringToLogLevel(level)
 }
 
 func (b *Backend) SetRotateByDay() {
@@ -222,8 +223,9 @@ func (b *Backend) SetRotateByHour() {
 	b.logSuffix = genHourTime(time.Now())
 }
 
-func (b *Backend) SetRotateBySize(size int) {
-	b.sizeRolling = size
+func (b *Backend) SetRotateBySize(size int64) {
+	b.sizeRolling = true
+	b.rotateSize = size
 	b.logSuffix = genNextSeq(b.logSuffix)
 }
 
@@ -232,16 +234,30 @@ func (b *Backend) rotate() error {
 	defer b.lock.Unlock()
 
 	var suffix string
-	if b.dailyRolling {
+	switch {
+	case b.dailyRolling:
 		suffix = genDayTime(time.Now())
-	} else if b.hourRolling {
+	case b.hourRolling:
 		suffix = genHourTime(time.Now())
-	} else {
+	case b.sizeRolling:
+		suffix = genNextSeq(b.logSuffix)
+	default:
 		return nil
 	}
 
-	// Notice: if suffix is not equal to l.LogSuffix, then rotate
+	// Notice: if suffix is not equal to b.LogSuffix, then rotate
+	// or current file size is bigger then b.rotateSize, then rotate
 	if suffix != b.logSuffix {
+		if b.sizeRolling {
+			stat, err := b.fd.Stat()
+			if err != nil {
+				return err
+			}
+			if stat.Size() < b.rotateSize {
+				return nil
+			}
+		}
+
 		err := b.doRotate(suffix)
 		if err != nil {
 			return err
@@ -332,7 +348,7 @@ func (b *Backend) Infof(format string, v ...interface{}) {
 }
 
 func (b *Backend) log(t LogType, v ...interface{}) {
-	if b.Level|LogLevel(t) != b.Level {
+	if b.level|LogLevel(t) != b.level {
 		return
 	}
 
@@ -344,7 +360,7 @@ func (b *Backend) log(t LogType, v ...interface{}) {
 
 	v1 := make([]interface{}, len(v)+2)
 	logStr, logColor := LogTypeToString(t)
-	if b.Colored {
+	if b.colored {
 		v1[0] = "\033" + logColor + "m[" + logStr + "]"
 		copy(v1[1:], v)
 		v1[len(v)+1] = "\033[0m"
@@ -359,7 +375,7 @@ func (b *Backend) log(t LogType, v ...interface{}) {
 }
 
 func (b *Backend) logf(t LogType, format string, v ...interface{}) {
-	if b.Level|LogLevel(t) != b.Level {
+	if b.level|LogLevel(t) != b.level {
 		return
 	}
 
@@ -371,7 +387,7 @@ func (b *Backend) logf(t LogType, format string, v ...interface{}) {
 
 	logStr, logColor := LogTypeToString(t)
 	var s string
-	if b.Colored {
+	if b.colored {
 		s = "\033" + logColor + "m[" + logStr + "] " + fmt.Sprintf(format, v...) + "\033[0m"
 	} else {
 		s = "[" + logStr + "] " + fmt.Sprintf(format, v...)
@@ -444,5 +460,5 @@ func NewSimpleBackend() *Backend {
 }
 
 func NewBackend(w io.Writer, prefix string, level LogLevel, colored bool) *Backend {
-	return &Backend{_log: log.New(w, prefix, LstdFlags), Level: level, Colored: colored}
+	return &Backend{_log: log.New(w, prefix, LstdFlags), level: level, colored: colored}
 }
