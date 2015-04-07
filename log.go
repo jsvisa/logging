@@ -57,6 +57,8 @@ type Backend struct {
 
 	level   LogLevel
 	colored bool
+	flags   int
+	prefix  string
 
 	dailyRolling bool
 	hourRolling  bool
@@ -288,7 +290,7 @@ func (b *Backend) doRotate(suffix string) error {
 }
 
 func (b *Backend) SetOutput(out io.Writer) {
-	b._log = log.New(out, b._log.Prefix(), b._log.Flags())
+	b._log = log.New(out, b.prefix, b.flags)
 }
 
 func (b *Backend) SetOutputByName(path string) error {
@@ -354,7 +356,7 @@ func (b *Backend) log(t LogType, v ...interface{}) {
 
 	err := b.rotate()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+		fmt.Fprintf(os.Stderr, "logging error of: %s\n", err.Error())
 		return
 	}
 
@@ -381,7 +383,7 @@ func (b *Backend) logf(t LogType, format string, v ...interface{}) {
 
 	err := b.rotate()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+		fmt.Fprintf(os.Stderr, "logging error of: %s\n", err.Error())
 		return
 	}
 
@@ -456,9 +458,24 @@ func New() Logger {
 }
 
 func NewSimpleBackend() *Backend {
-	return NewBackend(os.Stdout, "", LOG_LEVEL_ALL, true)
+	return NewBackend(os.Stdout, "", LstdFlags, LOG_LEVEL_ALL, true)
 }
 
-func NewBackend(w io.Writer, prefix string, level LogLevel, colored bool) *Backend {
-	return &Backend{_log: log.New(w, prefix, LstdFlags), level: level, colored: colored}
+func NewBackend(w interface{}, prefix string, flags int, level LogLevel, colored bool) *Backend {
+	b := &Backend{
+		level:   level,
+		colored: colored,
+		prefix:  prefix,
+		flags:   flags,
+	}
+
+	switch w := w.(type) {
+	case io.Writer:
+		b.SetOutput(w)
+	case string:
+		b.SetOutputByName(w)
+	default:
+		return nil
+	}
+	return b
 }
